@@ -9,6 +9,7 @@ ADMIN_ID = 5257065430
 bot = telebot.TeleBot(TOKEN)
 
 user_paths = {} 
+user_states = {}
 
 # /start
 @bot.message_handler(commands=['start'])
@@ -55,8 +56,67 @@ def callback_query(call):
         navigate_to_category(call)
     elif call.data == "back_main_page":
         show_categories(call.message.chat.id, parent_id=None)
+    elif call.data.startswith("selectcat_"):
+        handle_category_selection(call)
 
         
+
+
+
+
+def handle_category_selection(call):
+    user_id = call.message.chat.id
+    if user_id not in user_states:
+        return
+
+    action_state = user_states[user_id]
+
+    if call.data == "selectcat_back":
+        if action_state["path"]:
+            action_state["path"].pop()
+        parent_id = action_state["path"][-1] if action_state["path"] else None
+        show_category_selector(user_id, parent_id)
+    elif call.data == "selectcat_done":
+        if action_state["action"] == "create_subcat":
+            path = action_state["path"]
+            if not path:
+                bot.send_message(user_id, "Сначала выберите категорию.")
+                return
+            parent_id = path[-1]
+            msg = bot.send_message(user_id, "Введите имя подкатегории:")
+            bot.register_next_step_handler(msg, lambda m: save_subcategory(m, parent_id, get_path_string(path)))
+            del user_states[user_id]
+        elif action_state["action"] == "add_item":
+            # Тоже самое: запрашиваем название товара
+            path = action_state["path"]
+            category_id = path[-1]
+            msg = bot.send_message(user_id, "Введите название товара:")
+            bot.register_next_step_handler(msg, lambda m: ask_for_item_description(m, get_path_string(path), category_id))
+            del user_states[user_id]
+    else:
+        cat_id = int(call.data.split("_")[1])
+        action_state["path"].append(cat_id)
+        show_category_selector(user_id, cat_id)
+
+
+
+
+def get_path_string(path_ids):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    names = []
+    for cat_id in path_ids:
+        cursor.execute("SELECT name FROM categories WHERE id = %s", (cat_id,))
+        row = cursor.fetchone()
+        if row:
+            names.append(row[0])
+    cursor.close()
+    conn.close()
+    return " > ".join(names)
+
+
+
+
 
 
 
@@ -167,8 +227,34 @@ def process_category_name(message):
 
 #Создать Подкатегории
 def create_subcategory(chat_id):
-    msg = bot.send_message(chat_id, "Введите путь до родительской категории (например: Одежда > Мужская):")
-    bot.register_next_step_handler(msg, ask_for_subcat_name)
+    user_states[chat_id] = {"action": "create_subcat", "path": []}
+    show_category_selector(chat_id, parent_id=None)
+
+
+
+def show_category_selector(chat_id, parent_id):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    if parent_id is None:
+        cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
+    else:
+        cursor.execute("SELECT id, name FROM categories WHERE parent_id = %s", (parent_id,))
+
+    categories = cursor.fetchall()
+    markup = InlineKeyboardMarkup()
+
+    for cat in categories:
+        markup.add(InlineKeyboardButton(cat['name'], callback_data=f"selectcat_{cat['id']}"))
+
+    if parent_id is not None:
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
+    markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
+    bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
+
+    cursor.close()
+    conn.close()
+
 
 
 def ask_for_subcat_name(message):
@@ -219,8 +305,9 @@ def get_category_id_by_path(path):
 
 # Добавление товара
 def add_item(chat_id):
-    msg = bot.send_message(chat_id, "Укажите путь до категории, куда добавить товар (например: Одежда > Мужская > Пуховики):")
-    bot.register_next_step_handler(msg, ask_for_item_title)
+    user_states[chat_id] = {"action": "add_item", "path": []}
+    show_category_selector(chat_id, parent_id=None)
+
 
 
 def ask_for_item_title(message):
