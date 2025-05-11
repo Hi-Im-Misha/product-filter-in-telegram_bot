@@ -3,12 +3,12 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from MySQL_settings import get_db_connection
 
-TOKEN = '8120525432:AAHdupFDF1PTU2r1KL5seaRBcz1vac03Tts'
+TOKEN = '7777122360:AAFqDFBpG66zvf95v5T8u5TRqZT386D_8r4'
 ADMIN_ID = 5257065430
 
 bot = telebot.TeleBot(TOKEN)
 
-
+user_paths = {} 
 
 # /start
 @bot.message_handler(commands=['start'])
@@ -39,14 +39,36 @@ def callback_query(call):
 
     if call.data == "create_cat":
         create_category(call.message.chat.id)
+    
     elif call.data == "create_subcat":
         create_subcategory(call.message.chat.id)
+    
     elif call.data == "add_item":
         add_item(call.message.chat.id)
+    
     elif call.data == "catalog":
         show_categories(call.message.chat.id, parent_id=None)
+
+    elif call.data == "back":
+        print('⬅️ Назад нажата')
+        user_id = call.message.chat.id
+        if user_id not in user_paths or not user_paths[user_id]:
+            return show_categories(user_id, parent_id=None)
+
+        user_paths[user_id].pop()  # удаляем текущий
+        if user_paths[user_id]:
+            parent_id = user_paths[user_id][-1]
+            show_categories(user_id, parent_id=parent_id)
+        else:
+            show_categories(user_id, parent_id=None)
+
     elif call.data.startswith("cat_"):
+        print('Категория выбрана')
         cat_id = int(call.data.split("_")[1])
+        path = user_paths.get(call.message.chat.id, [])
+        path.append(cat_id)
+        user_paths[call.message.chat.id] = path
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (cat_id,))
@@ -59,14 +81,16 @@ def callback_query(call):
             show_categories(call.message.chat.id, cat_id)
         else:
             show_items(call.message.chat.id, cat_id)
-    elif call.data == "back_root":
+
+    elif call.data == "back_main_page":
         show_categories(call.message.chat.id, parent_id=None)
+
+        
 
 
 
 # Показ категорий
 def show_categories(chat_id, parent_id):
-    print("show_categories")
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -82,13 +106,14 @@ def show_categories(chat_id, parent_id):
         markup.add(InlineKeyboardButton(text=category["name"], callback_data=f"cat_{category['id']}"))
 
     if parent_id is not None:
-        markup.add(InlineKeyboardButton(text="⬅️ Назад", callback_data="back"))
-        markup.add(InlineKeyboardButton(text="⬅️ На главную", callback_data="back_root"))
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="back"))
+    markup.add(InlineKeyboardButton("⬅️ На главную", callback_data="back_main_page"))
 
     bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
 
     cursor.close()
     conn.close()
+
 
 
 
@@ -109,37 +134,62 @@ def show_items(chat_id, category_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('cat_'))
 def handle_category_click(call):
-    cat_id = int(call.data.split("_")[1])
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (cat_id,))
-    subcategory_count = cursor.fetchone()[0]
-    cursor.close()
-    conn.close()
+        print('Категория выбрана')
+        cat_id = int(call.data.split("_")[1])
+        path = user_paths.get(call.message.chat.id, [])
+        path.append(cat_id)
+        user_paths[call.message.chat.id] = path
 
-    if subcategory_count > 0:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (cat_id,))
+        subcategory_count = cursor.fetchone()[0]
+        cursor.close()
+        conn.close()
+
         bot.delete_message(call.message.chat.id, call.message.message_id)
-        show_categories(call.message.chat.id, cat_id)
-    else:
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        show_items(call.message.chat.id, cat_id)
+        if subcategory_count > 0:
+            show_categories(call.message.chat.id, cat_id)
+        else:
+            show_items(call.message.chat.id, cat_id)
+
 
 
 
 #На главную
-@bot.callback_query_handler(func=lambda call: call.data == "back_root")
+@bot.callback_query_handler(func=lambda call: call.data == "back_main_page")
 def handle_back(call):
     show_categories(call.message.chat.id, parent_id=None)
+
+
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cat_"))
+def handle_category_click(call):
+    print('cat_')
+    cat_name = call.data[4:]  # убираем префикс "cat_"
+    path = user_paths.get(call.message.chat.id, [])
+    path.append(cat_name)
+    show_categories(call.message.chat.id, path)
+
+
 
 
 #Назад
 @bot.callback_query_handler(func=lambda call: call.data == "back")
 def handle_back(call):
-    back(call.message.chat.id, parent_id=None)
+    print('back')
+    user_id = call.message.chat.id
+    if user_id not in user_paths or not user_paths[user_id]:
+        return show_categories(user_id, parent_id=None)
 
+    user_paths[user_id].pop()  # удаляем текущий
+    if user_paths[user_id]:
+        parent_id = user_paths[user_id][-1]
+        show_categories(user_id, parent_id=parent_id)
+    else:
+        show_categories(user_id, parent_id=None)
 
-def back(chat_id, parent_id):
-    pass
 
 
 
