@@ -39,6 +39,7 @@ def callback_query(call):
     bot.answer_callback_query(call.id)
 
     if call.data == "create_cat":
+        print('create_cat--------------------')
         create_category(call.message.chat.id)
     
     elif call.data == "create_subcat":
@@ -48,11 +49,13 @@ def callback_query(call):
         add_item(call.message.chat.id)
     
     elif call.data == "catalog":
-        show_categories(call.message.chat.id, parent_id=None)
+        browse_catalog(call.message.chat.id)
+
 
     elif call.data == "back":
         navigate_back(call)
     elif call.data.startswith("cat_"):
+        print('cat_--------------------')
         navigate_to_category(call)
     elif call.data == "back_main_page":
         show_categories(call.message.chat.id, parent_id=None)
@@ -60,6 +63,12 @@ def callback_query(call):
         handle_category_selection(call)
 
         
+
+
+
+def browse_catalog(chat_id):
+    user_states[chat_id] = {"action": "view_catalog", "path": []}
+    show_category_selector(chat_id, parent_id=None)
 
 
 
@@ -75,7 +84,8 @@ def handle_category_selection(call):
         if action_state["path"]:
             action_state["path"].pop()
         parent_id = action_state["path"][-1] if action_state["path"] else None
-        show_category_selector(user_id, parent_id)
+        show_category_selector(user_id, parent_id, message_id=call.message.message_id)
+
     elif call.data == "selectcat_done":
         if action_state["action"] == "create_subcat":
             path = action_state["path"]
@@ -87,16 +97,38 @@ def handle_category_selection(call):
             bot.register_next_step_handler(msg, lambda m: save_subcategory(m, parent_id, get_path_string(path)))
             del user_states[user_id]
         elif action_state["action"] == "add_item":
-            # Тоже самое: запрашиваем название товара
             path = action_state["path"]
             category_id = path[-1]
             msg = bot.send_message(user_id, "Введите название товара:")
             bot.register_next_step_handler(msg, lambda m: ask_for_item_description(m, get_path_string(path), category_id))
             del user_states[user_id]
+
+        elif action_state["action"] == "view_catalog":
+            path = action_state["path"]
+            if not path:
+                bot.send_message(user_id, "Сначала выберите категорию.")
+                return
+            category_id = path[-1]
+
+            # Показываем подкатегории или товары
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (category_id,))
+            subcategory_count = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+
+            if subcategory_count > 0:
+                show_category_selector(user_id, category_id)
+            else:
+                show_items(user_id, category_id)
+                del user_states[user_id]  # очищаем состояние
+
     else:
         cat_id = int(call.data.split("_")[1])
         action_state["path"].append(cat_id)
-        show_category_selector(user_id, cat_id)
+        show_category_selector(user_id, cat_id, message_id=call.message.message_id)
+
 
 
 
@@ -205,6 +237,7 @@ def navigate_back(call):
 
 # Создать Категории
 def create_category(chat_id):
+    print('Создать Категории нажата--------------')
     msg = bot.send_message(chat_id, "Введите название новой категории:")
     bot.register_next_step_handler(msg, process_category_name)
 
@@ -232,7 +265,8 @@ def create_subcategory(chat_id):
 
 
 
-def show_category_selector(chat_id, parent_id):
+def show_category_selector(chat_id, parent_id, message_id=None):
+    print('show_category_selector-------')
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -250,10 +284,15 @@ def show_category_selector(chat_id, parent_id):
     if parent_id is not None:
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
     markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
-    bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
+
+    if message_id:
+        bot.edit_message_text("Выберите категорию:", chat_id=chat_id, message_id=message_id, reply_markup=markup)
+    else:
+        bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
 
     cursor.close()
     conn.close()
+
 
 
 
@@ -361,7 +400,7 @@ def save_item(message, path, category_id, title, description, photo_id):
     cursor.close()
     conn.close()
 
-    bot.send_message(message.chat.id, f"Товар '{title}' успешно добавлен в {path}.")
+    bot.send_message(message.chat.id, f"Товар '{title}' успешно добавлен в {path} > {title}.")
 
 
 bot.polling()
