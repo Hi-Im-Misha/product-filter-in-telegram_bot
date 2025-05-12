@@ -201,11 +201,16 @@ def show_items(chat_id, category_id):
 
 
 
+# Словарь для хранения `message_id` медиа-сообщений
+media_messages = {}
+
+
+
 def handle_item_selection(call):
     item_id = int(call.data.split("_")[1])
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT title, description, photo_id, video_id FROM items WHERE id = %s", (item_id,))
+    cursor.execute("SELECT title, description FROM items WHERE id = %s", (item_id,))
     item = cursor.fetchone()
     cursor.close()
     conn.close()
@@ -215,26 +220,44 @@ def handle_item_selection(call):
     if item:
         title = item["title"]
         description = item["description"]
-        photo_path = r'C:\mylife\Git_project\filteg_tg\3txJdpHYuuk.jpg'
+        photo_path1 = r'C:\mylife\Git_project\filteg_tg\3txJdpHYuuk.jpg'
         video_path = r'C:\mylife\Git_project\filteg_tg\Администратор_ Windows PowerShell 2025-02-21 18-06-27.mp4'
-
+        photo_path2 = r'C:\mylife\Git_project\filteg_tg\1663986735_10-phonoteka-org-p-oboi-na-telefon-v-stile-fonk-krasivo-11.png'
         media = []
-        
-        # Добавляем видео (если есть)
-        if description:
-            media.append(InputMediaVideo(open(video_path, 'rb'), caption=f"<b>{title}</b>\n\n{description}", parse_mode='HTML'))
-        
-        # Добавляем фото (если есть)
-        if title:
-            media.append(InputMediaPhoto(open(photo_path, 'rb')))
-        
-        if media:
-            bot.send_media_group(call.message.chat.id, media)  # ✅ Отправляем медиа-группу
-        else:
-            bot.send_message(call.message.chat.id, f"<b>{title}</b>\n\n{description}", parse_mode='HTML')
+
+        try:
+            with open(video_path, 'rb') as video_file:
+                video_data = video_file.read()
+                media.append(InputMediaVideo(video_data, caption=f"<b>{title}</b>\n\n{description}", parse_mode='HTML'))
+            
+            with open(photo_path1, 'rb') as photo_file:
+                photo_data = photo_file.read()
+                media.append(InputMediaPhoto(photo_data))
+            
+            with open(photo_path2, 'rb') as photo_file:
+                photo_data = photo_file.read()
+                media.append(InputMediaPhoto(photo_data))
+
+            # Удаляем все предыдущие сообщения медиа-группы
+            if call.message.chat.id in media_messages:
+                for msg_id in media_messages[call.message.chat.id]:
+                    bot.delete_message(call.message.chat.id, msg_id)
+
+            # Отправляем новую медиа-группу
+            sent_messages = bot.send_media_group(call.message.chat.id, media)
+
+            # Запоминаем `message_id` всех отправленных сообщений
+            media_messages[call.message.chat.id] = [msg.message_id for msg in sent_messages]
+
+        except FileNotFoundError:
+            bot.send_message(call.message.chat.id, "Ошибка: один из файлов не найден.")
 
     else:
         bot.send_message(call.message.chat.id, "Товар не найден.")
+
+
+
+
 
 
 
