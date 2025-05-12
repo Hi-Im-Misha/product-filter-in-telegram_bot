@@ -63,7 +63,8 @@ def callback_query(call):
         handle_category_selection(call)
     elif call.data.startswith("item_"):
         handle_item_selection(call)
-        
+    elif call.data.startswith("page_"):
+        handle_pagination(call)
 
 
 
@@ -179,25 +180,82 @@ def show_categories(chat_id, parent_id):
 
 
 
-def show_items(chat_id, category_id):
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def show_items(chat_id, category_id, page=0):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT id, title, description FROM items WHERE category_id = %s", (category_id,))
+    
+    # Получаем все товары в категории
+    cursor.execute("SELECT id, title FROM items WHERE category_id = %s", (category_id,))
     items = cursor.fetchall()
-
-    if items:
-        text = "<b>Товары в категории:</b>\n\n"
-        markup = InlineKeyboardMarkup()
-
-        for item in items:
-            markup.add(InlineKeyboardButton(f"Подробнее: {item['title']}", callback_data=f"item_{item['id']}"))
-
-        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-    else:
-        bot.send_message(chat_id, "Нет товаров в этой категории.")
-
     cursor.close()
     conn.close()
+
+    items_per_page = 8  # Количество товаров на странице
+    total_pages = (len(items) - 1) // items_per_page + 1  # Общее число страниц
+    
+    # Получаем товары для текущей страницы
+    start = page * items_per_page
+    end = start + items_per_page
+    page_items = items[start:end]
+
+    text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
+    markup = InlineKeyboardMarkup(row_width=2)  # 2 колонки кнопок
+
+    buttons = []
+    for item in page_items:
+        buttons.append(InlineKeyboardButton(item['title'], callback_data=f"item_{item['id']}"))
+
+    # Размещаем кнопки **по 4 в ряд (2 столбца × 4 строки)**
+    for i in range(0, len(buttons), 2):
+        if i+1 < len(buttons):
+            markup.row(buttons[i], buttons[i+1])  # Добавляем две кнопки в строку
+        else:
+            markup.add(buttons[i])  # Если нечетное кол-во, добавляем последнюю кнопку
+
+    # Кнопки пагинации
+    pagination_buttons = []
+    if page > 0:
+        pagination_buttons.append(InlineKeyboardButton("◀ Назад", callback_data=f"page_{category_id}_{page-1}"))
+    if page < total_pages - 1:
+        pagination_buttons.append(InlineKeyboardButton("Вперед ▶", callback_data=f"page_{category_id}_{page+1}"))
+
+    if pagination_buttons:
+        markup.row(*pagination_buttons)  # Размещаем кнопки пагинации в одной строке
+
+    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+
+
+
+
+def handle_pagination(call):
+    _, category_id, page = call.data.split("_")
+    category_id = int(category_id)
+    page = int(page)
+
+    # Удаляем старое сообщение и отправляем обновленное
+    bot.delete_message(call.message.chat.id, call.message.message_id)
+    show_items(call.message.chat.id, category_id, page)
+
+
+
+
 
 
 
