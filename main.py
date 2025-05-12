@@ -39,7 +39,6 @@ def callback_query(call):
     bot.answer_callback_query(call.id)
 
     if call.data == "create_cat":
-        print('create_cat--------------------')
         create_category(call.message.chat.id)
     
     elif call.data == "create_subcat":
@@ -55,7 +54,6 @@ def callback_query(call):
     elif call.data == "back":
         navigate_back(call)
     elif call.data.startswith("cat_"):
-        print('cat_--------------------')
         navigate_to_category(call)
     elif call.data == "back_main_page":
         show_categories(call.message.chat.id, parent_id=None)
@@ -87,47 +85,43 @@ def handle_category_selection(call):
         show_category_selector(user_id, parent_id, message_id=call.message.message_id)
 
     elif call.data == "selectcat_done":
+        # Завершаем выбор категории только для create_subcat и add_item
+        path = action_state["path"]
+        if not path:
+            bot.send_message(user_id, "Сначала выберите категорию.")
+            return
+        category_id = path[-1]
         if action_state["action"] == "create_subcat":
-            path = action_state["path"]
-            if not path:
-                bot.send_message(user_id, "Сначала выберите категорию.")
-                return
-            parent_id = path[-1]
             msg = bot.send_message(user_id, "Введите имя подкатегории:")
-            bot.register_next_step_handler(msg, lambda m: save_subcategory(m, parent_id, get_path_string(path)))
-            del user_states[user_id]
+            bot.register_next_step_handler(msg, lambda m: save_subcategory(m, category_id, get_path_string(path)))
         elif action_state["action"] == "add_item":
-            path = action_state["path"]
-            category_id = path[-1]
             msg = bot.send_message(user_id, "Введите название товара:")
             bot.register_next_step_handler(msg, lambda m: ask_for_item_description(m, get_path_string(path), category_id))
-            del user_states[user_id]
+        del user_states[user_id]
 
-        elif action_state["action"] == "view_catalog":
-            path = action_state["path"]
-            if not path:
-                bot.send_message(user_id, "Сначала выберите категорию.")
-                return
-            category_id = path[-1]
+    else:
+        # Пользователь выбрал категорию
+        cat_id = int(call.data.split("_")[1])
+        action_state["path"].append(cat_id)
 
-            # Показываем подкатегории или товары
+        # Если действие "Просмотр каталога" — сразу показываем
+        if action_state["action"] == "view_catalog":
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (category_id,))
+            cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (cat_id,))
             subcategory_count = cursor.fetchone()[0]
             cursor.close()
             conn.close()
 
             if subcategory_count > 0:
-                show_category_selector(user_id, category_id)
+                show_category_selector(user_id, cat_id, message_id=call.message.message_id)
             else:
-                show_items(user_id, category_id)
-                del user_states[user_id]  # очищаем состояние
+                show_items(user_id, cat_id)
+                del user_states[user_id]
+        else:
+            # Для добавления или создания подкатегорий — продолжаем выбор
+            show_category_selector(user_id, cat_id, message_id=call.message.message_id)
 
-    else:
-        cat_id = int(call.data.split("_")[1])
-        action_state["path"].append(cat_id)
-        show_category_selector(user_id, cat_id, message_id=call.message.message_id)
 
 
 
@@ -169,8 +163,10 @@ def show_categories(chat_id, parent_id):
         markup.add(InlineKeyboardButton(text=category["name"], callback_data=f"cat_{category['id']}"))
 
     if parent_id is not None:
-        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="back"))
-    markup.add(InlineKeyboardButton("⬅️ На главную", callback_data="back_main_page"))
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
+        if user_states.get(chat_id, {}).get("action") != "view_catalog":
+            markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
+
 
     bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
 
@@ -198,7 +194,6 @@ def show_items(chat_id, category_id):
 
 #Назад
 def navigate_to_category(call):
-    print('Категория выбрана')
     cat_id = int(call.data.split("_")[1])
     path = user_paths.get(call.message.chat.id, [])
     path.append(cat_id)
@@ -219,7 +214,6 @@ def navigate_to_category(call):
 
 
 def navigate_back(call):
-    print('⬅️ Назад нажата')
     user_id = call.message.chat.id
     if user_id not in user_paths or not user_paths[user_id]:
         return show_categories(user_id, parent_id=None)
@@ -237,7 +231,6 @@ def navigate_back(call):
 
 # Создать Категории
 def create_category(chat_id):
-    print('Создать Категории нажата--------------')
     msg = bot.send_message(chat_id, "Введите название новой категории:")
     bot.register_next_step_handler(msg, process_category_name)
 
@@ -266,7 +259,6 @@ def create_subcategory(chat_id):
 
 
 def show_category_selector(chat_id, parent_id, message_id=None):
-    print('show_category_selector-------')
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -283,7 +275,9 @@ def show_category_selector(chat_id, parent_id, message_id=None):
 
     if parent_id is not None:
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
-    markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
+        if user_states.get(chat_id, {}).get("action") != "view_catalog":
+            markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
+
 
     if message_id:
         bot.edit_message_text("Выберите категорию:", chat_id=chat_id, message_id=message_id, reply_markup=markup)
