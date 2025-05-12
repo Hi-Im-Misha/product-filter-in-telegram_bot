@@ -1,5 +1,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InputMediaPhoto, InputMediaVideo
+
 
 from MySQL_settings import get_db_connection
 
@@ -59,7 +61,8 @@ def callback_query(call):
         show_categories(call.message.chat.id, parent_id=None)
     elif call.data.startswith("selectcat_"):
         handle_category_selection(call)
-
+    elif call.data.startswith("item_"):
+        handle_item_selection(call)
         
 
 
@@ -179,16 +182,68 @@ def show_categories(chat_id, parent_id):
 def show_items(chat_id, category_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM items WHERE category_id = %s", (category_id,))
+    cursor.execute("SELECT id, title, description FROM items WHERE category_id = %s", (category_id,))
     items = cursor.fetchall()
+
     if items:
+        text = "<b>Товары в категории:</b>\n\n"
+        markup = InlineKeyboardMarkup()
+
         for item in items:
-            text = f"<b>{item['title']}</b>\n{item['description']}"
-            bot.send_message(chat_id, text, parse_mode='HTML')
+            markup.add(InlineKeyboardButton(f"Подробнее: {item['title']}", callback_data=f"item_{item['id']}"))
+
+        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
     else:
         bot.send_message(chat_id, "Нет товаров в этой категории.")
+
     cursor.close()
     conn.close()
+
+
+
+def handle_item_selection(call):
+    item_id = int(call.data.split("_")[1])
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT title, description, photo_id, video_id FROM items WHERE id = %s", (item_id,))
+    item = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    from telebot.types import InputMediaPhoto, InputMediaVideo
+
+    if item:
+        title = item["title"]
+        description = item["description"]
+        photo_path = r'C:\mylife\Git_project\filteg_tg\3txJdpHYuuk.jpg'
+        video_path = r'C:\mylife\Git_project\filteg_tg\Администратор_ Windows PowerShell 2025-02-21 18-06-27.mp4'
+
+        media = []
+        
+        # Добавляем видео (если есть)
+        if description:
+            media.append(InputMediaVideo(open(video_path, 'rb'), caption=f"<b>{title}</b>\n\n{description}", parse_mode='HTML'))
+        
+        # Добавляем фото (если есть)
+        if title:
+            media.append(InputMediaPhoto(open(photo_path, 'rb')))
+        
+        if media:
+            bot.send_media_group(call.message.chat.id, media)  # ✅ Отправляем медиа-группу
+        else:
+            bot.send_message(call.message.chat.id, f"<b>{title}</b>\n\n{description}", parse_mode='HTML')
+
+    else:
+        bot.send_message(call.message.chat.id, "Товар не найден.")
+
+
+
+
+
+
+
+
+
 
 
 
@@ -263,8 +318,10 @@ def show_category_selector(chat_id, parent_id, message_id=None):
     cursor = conn.cursor(dictionary=True)
 
     if parent_id is None:
+        print("parent_id is None")
         cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
     else:
+        print("parent_id is not None")
         cursor.execute("SELECT id, name FROM categories WHERE parent_id = %s", (parent_id,))
 
     categories = cursor.fetchall()
