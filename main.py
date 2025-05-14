@@ -13,18 +13,19 @@ bot = telebot.TeleBot(TOKEN)
 user_paths = {} 
 user_states = {}
 
-# /start
+
 @bot.message_handler(commands=['start'])
 def start_handler(message):
-    if message.from_user.id != ADMIN_ID:
-        bot.send_message(message.chat.id, "Доступ запрещён.")
-        return
+    # if message.from_user.id != ADMIN_ID:
+    #     bot.send_message(message.chat.id, "Доступ запрещён.")
+    #     return
 
     markup = InlineKeyboardMarkup()
     markup.add(
         InlineKeyboardButton("🗂 Создать подкатегорию", callback_data="create_subcat"),
         InlineKeyboardButton("➕ Добавить товар", callback_data="add_item"),
-        InlineKeyboardButton("💰 Вывести каталог", callback_data="catalog")
+        InlineKeyboardButton("💰 Вывести каталог", callback_data="catalog"),
+        InlineKeyboardButton("🗑 Удаление", callback_data="delete_menu")
     )
 
     bot.send_message(message.chat.id, "Привет, админ! Выберите действие:", reply_markup=markup)
@@ -48,9 +49,6 @@ def callback_query(call):
     elif call.data == "catalog":
         browse_catalog(call.message.chat.id)
 
-
-    elif call.data == "back":
-        navigate_back(call)
     elif call.data.startswith("cat_"):
         navigate_to_category(call)
     elif call.data == "back_main_page":
@@ -61,6 +59,330 @@ def callback_query(call):
         handle_item_selection(call)
     elif call.data.startswith("page_"):
         handle_pagination(call)
+    
+
+
+
+
+
+    
+    elif call.data == "delete_menu":
+        delete_menu(call)
+    
+    elif call.data == "delete_categories":
+        navigate_delete_categories(call)
+
+    elif call.data.startswith("delcatnav_"):
+        cat_id = int(call.data.split("_")[1])
+        navigate_delete_categories(call, parent_id=cat_id)
+
+    elif call.data.startswith("deldetcat_"):
+        cat_id = int(call.data.split("_")[1])
+        delete_specific_category(call, cat_id)
+
+    elif call.data.startswith("delback_"):
+        current_id = int(call.data.split("_")[1])
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT parent_id FROM categories WHERE id = %s", (current_id,))
+        row = cursor.fetchone()
+        parent_id = row[0] if row else None
+        cursor.close()
+        conn.close()
+        navigate_delete_categories(call, parent_id=parent_id)
+
+    elif call.data.startswith("delete_items_"):
+        parent_id = call.data.split("_")[2]
+        delete_items(call, parent_id)
+
+
+    elif call.data.startswith("start"):
+        return_to_start(call)
+    elif call.data.startswith("confirm_deleteitem_"):
+        confirm_deleteitem(call)
+
+    elif call.data.startswith("confirm_deletecat_"):
+        confirm_deletecat(call)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def delete_menu(call):
+    print('delete_menu')
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("🗑 Удалить категорию", callback_data="delete_categories"))
+    # markup.add(InlineKeyboardButton("🗑 Удалить товар", callback_data="delete_items"))
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="start"))
+    bot.edit_message_text("Выберите, что хотите удалить:", chat_id=call.message.chat.id,
+                          message_id=call.message.message_id, reply_markup=markup)
+
+
+
+
+
+def delete_categories(call):
+    print('delete_categories')
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
+    categories = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    markup = InlineKeyboardMarkup()
+    for cat in categories:
+        markup.add(InlineKeyboardButton(f"🗑 {cat['name']}", callback_data=f"confirm_deletecat_{cat['id']}"))
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="delete_menu"))
+
+    try:
+        bot.edit_message_text(f"Выберите категорию для удаления (всего {len(categories)}):",
+                              chat_id=call.message.chat.id,
+                              message_id=call.message.message_id,
+                              reply_markup=markup)
+    except telebot.apihelper.ApiTelegramException as e:
+        if "message is not modified" in str(e):
+            pass
+        else:
+            raise
+
+
+def delete_category_recursive(cursor, cat_id):
+    print('delete_category_recursive')
+    # Удаляем все товары в этой категории
+    cursor.execute("DELETE FROM items WHERE category_id = %s", (cat_id,))
+    
+    # Получаем подкатегории
+    cursor.execute("SELECT id FROM categories WHERE parent_id = %s", (cat_id,))
+    subcategories = cursor.fetchall()
+
+    for subcat in subcategories:
+        delete_category_recursive(cursor, subcat[0])  # Рекурсивно удаляем подкатегорию
+
+    # Удаляем саму категорию
+    cursor.execute("DELETE FROM categories WHERE id = %s", (cat_id,))
+
+
+
+
+
+def delete_items(call, parent_id):
+    print(f"parent_id: {parent_id}")
+    print(type(parent_id), parent_id) 
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id, title FROM items WHERE category_id = %s ORDER BY id DESC LIMIT 20", (int(parent_id),))
+    items = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    markup = InlineKeyboardMarkup()
+    for item in items:
+        markup.add(InlineKeyboardButton(f"🗑 {item['title']}", callback_data=f"confirm_deleteitem_{item['id']}"))
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="delete_menu"))
+
+    bot.edit_message_text("Выберите товар для удаления:", chat_id=call.message.chat.id,
+                          message_id=call.message.message_id, reply_markup=markup)
+
+
+
+
+
+def confirm_deleteitem(call):
+    print('confirm_deleteitem')
+    item_id = int(call.data.split("_")[-1])
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM items WHERE id = %s", (item_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    bot.answer_callback_query(call.id, "Товар удалён.")
+    delete_items(call)
+
+
+
+
+
+
+
+
+
+
+
+
+def confirm_deletecat(call):
+    print('confirm_deletecat')
+    cat_id = int(call.data.split("_")[-1])
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Удаляем категорию и всё, что в ней
+    delete_category_recursive(cursor, cat_id)
+    conn.commit()
+
+    bot.answer_callback_query(call.id, "Категория и всё содержимое удалены.")
+    cursor.close()
+    conn.close()
+    delete_categories(call)
+
+
+
+
+
+def return_to_start(call):
+    start_handler(call.message)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def navigate_delete_categories(call, parent_id=None):
+    print('navigate_delete_categories')
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    if parent_id:
+        cursor.execute("SELECT name FROM categories WHERE id = %s", (parent_id,))
+        parent = cursor.fetchone()
+        title = f"🗂 Подкатегории '{parent['name']}':"
+    else:
+        title = "🗂 Категории для удаления:"
+
+    if parent_id is None:
+        cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
+    else:
+        cursor.execute("SELECT id, name FROM categories WHERE parent_id = %s", (parent_id,))
+
+    categories = cursor.fetchall()
+
+    markup = InlineKeyboardMarkup()
+    for cat in categories:
+        markup.add(InlineKeyboardButton(f"📁 {cat['name']}", callback_data=f"delcatnav_{cat['id']}"))
+
+    if parent_id:
+        cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (parent_id,))
+        has_subcats = cursor.fetchone()['COUNT(*)']
+        cursor.execute("SELECT COUNT(*) FROM items WHERE category_id = %s", (parent_id,))
+        has_items = cursor.fetchone()['COUNT(*)']
+
+        if has_subcats == 0 and has_items == 0:
+            markup.add(InlineKeyboardButton("🗑 Удалить эту категорию", callback_data=f"deldetcat_{parent_id}"))
+        elif has_items >= 1:
+            markup.add(InlineKeyboardButton("🗑 Удалить товар", callback_data=f"delete_items_{parent_id}"))
+
+    if parent_id:
+        markup.add(InlineKeyboardButton("🔙 Назад", callback_data=f"delback_{parent_id}"))
+    else:
+        markup.add(InlineKeyboardButton("🔙 Назад", callback_data="delete_menu"))
+
+    bot.edit_message_text(title, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
+
+    cursor.close()
+    conn.close()
+
+
+
+
+
+
+
+
+
+
+
+def delete_specific_category(call, cat_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (cat_id,))
+    has_subcats = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM items WHERE category_id = %s", (cat_id,))
+    has_items = cursor.fetchone()[0]
+
+    if has_subcats or has_items:
+        bot.answer_callback_query(call.id, "❌ Категория не пуста.", show_alert=True)
+    else:
+        cursor.execute("DELETE FROM categories WHERE id = %s", (cat_id,))
+        conn.commit()
+        bot.answer_callback_query(call.id, "✅ Категория удалена.")
+
+    cursor.close()
+    conn.close()
+    navigate_delete_categories(call, parent_id=None)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -124,8 +446,6 @@ def handle_category_selection(call):
 
 
 
-
-
 def get_path_string(path_ids):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -138,10 +458,6 @@ def get_path_string(path_ids):
     cursor.close()
     conn.close()
     return " > ".join(names)
-
-
-
-
 
 
 
@@ -165,7 +481,6 @@ def show_categories(chat_id, parent_id):
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
         if user_states.get(chat_id, {}).get("action") != "view_catalog":
             markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
-
 
     bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
 
@@ -317,21 +632,6 @@ def navigate_to_category(call):
         show_items(call.message.chat.id, cat_id)
 
 
-def navigate_back(call):
-    print("-------------------------navigate_back---------------------------")
-    user_id = call.message.chat.id
-    if user_id not in user_paths or not user_paths[user_id]:
-        return show_categories(user_id, parent_id=None)
-
-    user_paths[user_id].pop() 
-    if user_paths[user_id]:
-        parent_id = user_paths[user_id][-1]
-        show_categories(user_id, parent_id=parent_id)
-    else:
-        show_categories(user_id, parent_id=None)
-
-
-
 
 
 # Создать Категории
@@ -372,10 +672,8 @@ def show_category_selector(chat_id, parent_id, message_id=None):
     cursor = conn.cursor(dictionary=True)
 
     if parent_id is None:
-        print("parent_id is None")
         cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
     else:
-        print("parent_id is not None")
         cursor.execute("SELECT id, name FROM categories WHERE parent_id = %s", (parent_id,))
 
     categories = cursor.fetchall()
@@ -383,15 +681,18 @@ def show_category_selector(chat_id, parent_id, message_id=None):
 
     for cat in categories:
         markup.add(InlineKeyboardButton(cat['name'], callback_data=f"selectcat_{cat['id']}"))
-
+        
+    
     if parent_id is not None:
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
     if user_states.get(chat_id, {}).get("action") != "view_catalog":
         markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
 
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="start"))
 
     if message_id:
         bot.edit_message_text("Выберите категорию:", chat_id=chat_id, message_id=message_id, reply_markup=markup)
+    
     else:
         bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
 
