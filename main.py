@@ -31,7 +31,6 @@ def start_handler(message):
     bot.send_message(message.chat.id, "Привет, админ! Выберите действие:", reply_markup=markup)
 
 
-#OK
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     if call.from_user.id != ADMIN_ID:
@@ -57,12 +56,8 @@ def callback_query(call):
         handle_pagination(call)
     
 
-
-
-
-
     
-    elif call.data == "delete_menu": # &&???????
+    elif call.data == "delete_menu": # ??????
         delete_menu(call)
     
     elif call.data == "delete_categories":
@@ -91,7 +86,6 @@ def callback_query(call):
 
 
 
-# ТУТ ДЕРЬМО  #OK
 def delete_menu(call):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🗑 Удалить категорию", callback_data="delete_categories"))
@@ -102,12 +96,10 @@ def delete_menu(call):
 
 
 
-#OK
 def delback_(call):
     user_id = call.from_user.id
     current_id = int(call.data.split("_")[1])
 
-    # Получаем parent_id из БД
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT parent_id FROM categories WHERE id = %s", (current_id,))
@@ -116,19 +108,16 @@ def delback_(call):
     cursor.close()
     conn.close()
 
-    # Обновляем путь
     action_state = user_states.get(user_id, {})
     path = action_state.get("path", [])
     if path and path[-1] == current_id:
-        path.pop()  # Удаляем текущую категорию
+        path.pop()  
     user_states[user_id] = {"path": path}
 
-    # Переход вверх
     navigate_delete_categories(call, parent_id=parent_id)
 
 
 
-#OK
 def delete_items(call, parent_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -148,13 +137,11 @@ def delete_items(call, parent_id):
 
 
 
-#OK
 def confirm_deleteitem(call):
     item_id = int(call.data.split("_")[-1])
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # Получаем parent_id, чтобы вернуться к списку товаров после удаления
     cursor.execute("SELECT category_id FROM items WHERE id = %s", (item_id,))
     row = cursor.fetchone()
     parent_id = row['category_id'] if row else None
@@ -172,12 +159,6 @@ def confirm_deleteitem(call):
 
 
 
-
-
-
-
-
-#OK
 def return_to_start(call):
     start_handler(call.message)
 
@@ -185,8 +166,6 @@ def return_to_start(call):
 
 
 
-
-#путь категорий в удалении #OK
 def get_full_category_path(cursor, parent_id):
     cursor.execute("SELECT name, parent_id FROM categories WHERE id = %s", (parent_id,))
     parent = cursor.fetchone()
@@ -194,43 +173,57 @@ def get_full_category_path(cursor, parent_id):
 
 
 
-#OK get_path_string
+
 def navigate_delete_categories(call, parent_id=None):
+    user_id = call.from_user.id
+    update_user_path(user_id, parent_id)
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    title = f"🗂 Подкатегории '{get_full_category_path(cursor, parent_id)}':" if parent_id else "🗂 Категории:"
+
+    path = user_states[user_id].get("path", [])
+    title = build_title(cursor, parent_id, path)
+    categories = get_categories(cursor, parent_id)
+    markup = build_category_markup(cursor, categories, parent_id)
+
+    bot.edit_message_text(title, chat_id=call.message.chat.id,
+                          message_id=call.message.message_id, reply_markup=markup)
+
+    cursor.close()
+    conn.close()
+
+def update_user_path(user_id, parent_id):
+    action_state = user_states.get(user_id, {})
+    path = action_state.get("path", [])
     if parent_id:
-        cursor.execute("SELECT name FROM categories WHERE id = %s", (parent_id,))
-        parent = cursor.fetchone()
-        
-
-        user_id = call.from_user.id
-        action_state = user_states.get(user_id, {})
-
-        path = action_state.get("path", [])
-        if parent_id:
-            if not path or path[-1] != parent_id:
-                path.append(parent_id)
-        else:
-            path = []
-        user_states[user_id] = {"path": path}
-
-
-        path_str = get_path_string(path)
-        title = f"🗂 Подкатегории '{path_str}':"
-
-   
+        if not path or path[-1] != parent_id:
+            path.append(parent_id)
     else:
-        title = "🗂 Категории для удаления:"
+        path = []
+    user_states[user_id] = {"path": path}
 
+
+
+def build_title(cursor, parent_id, path):
+    if parent_id:
+        path_str = get_path_string(path)
+        return f"🗂 Подкатегории '{path_str}':"
+    else:
+        return "🗂 Категории для удаления:"
+
+
+
+def get_categories(cursor, parent_id):
     if parent_id is None:
         cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
     else:
         cursor.execute("SELECT id, name FROM categories WHERE parent_id = %s", (parent_id,))
+    return cursor.fetchall()
 
-    categories = cursor.fetchall()
 
+def build_category_markup(cursor, categories, parent_id):
     markup = InlineKeyboardMarkup()
+
     for cat in categories:
         markup.add(InlineKeyboardButton(f"📁 {cat['name']}", callback_data=f"delcatnav_{cat['id']}"))
 
@@ -245,26 +238,13 @@ def navigate_delete_categories(call, parent_id=None):
         elif has_items >= 1:
             markup.add(InlineKeyboardButton("🗑 Удалить товар", callback_data=f"delete_items_{parent_id}"))
 
-    if parent_id:
-        markup.add(InlineKeyboardButton("🔙 Назад", callback_data=f"delback_{parent_id}"))
-    else:
-        markup.add(InlineKeyboardButton("🔙 Назад", callback_data="delete_menu"))
+    back_callback = f"delback_{parent_id}" if parent_id else "delete_menu"
+    markup.add(InlineKeyboardButton("🔙 Назад", callback_data=back_callback))
 
-    bot.edit_message_text(title, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
-
-    cursor.close()
-    conn.close()
+    return markup
 
 
 
-
-
-
-
-
-
-
-#OK
 def delete_specific_category(call, cat_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -289,18 +269,12 @@ def delete_specific_category(call, cat_id):
 
 
 
-
-
-
-
-#OK
 def browse_catalog(chat_id):
     user_states[chat_id] = {"action": "view_catalog", "path": []}
     show_category_selector(chat_id, parent_id=None)
 
 
 
-#OK
 def handle_category_selection(call):
     user_id = call.message.chat.id
     if user_id not in user_states:
@@ -329,11 +303,9 @@ def handle_category_selection(call):
         del user_states[user_id]
 
     else:
-        # Пользователь выбрал категорию
         cat_id = int(call.data.split("_")[1])
         action_state["path"].append(cat_id)
 
-        # Если действие "Просмотр каталога" — сразу показываем
         if action_state["action"] == "view_catalog":
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -348,12 +320,10 @@ def handle_category_selection(call):
                 show_items(user_id, cat_id)
                 del user_states[user_id]
         else:
-            # Для добавления или создания подкатегорий — продолжаем выбор
             show_category_selector(user_id, cat_id, message_id=call.message.message_id)
 
 
 
-#OK
 def get_path_string(path_ids):
     print("path_ids:", path_ids)
     conn = get_db_connection()
@@ -370,40 +340,35 @@ def get_path_string(path_ids):
 
 
 
-#OK
 def show_items(chat_id, category_id, page=0):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
-    # Получаем все товары в категории
     cursor.execute("SELECT id, title FROM items WHERE category_id = %s", (category_id,))
     items = cursor.fetchall()
     cursor.close()
     conn.close()
 
-    items_per_page = 8  # Количество товаров на странице
-    total_pages = (len(items) - 1) // items_per_page + 1  # Общее число страниц
+    items_per_page = 8
+    total_pages = (len(items) - 1) // items_per_page + 1
     
-    # Получаем товары для текущей страницы
     start = page * items_per_page
     end = start + items_per_page
     page_items = items[start:end]
 
     text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
-    markup = InlineKeyboardMarkup(row_width=2)  # 2 колонки кнопок
+    markup = InlineKeyboardMarkup(row_width=2)
 
     buttons = []
     for item in page_items:
         buttons.append(InlineKeyboardButton(item['title'], callback_data=f"item_{item['id']}"))
 
-    # Размещаем кнопки **по 4 в ряд (2 столбца × 4 строки)**
     for i in range(0, len(buttons), 2):
         if i+1 < len(buttons):
-            markup.row(buttons[i], buttons[i+1])  # Добавляем две кнопки в строку
+            markup.row(buttons[i], buttons[i+1]) 
         else:
-            markup.add(buttons[i])  # Если нечетное кол-во, добавляем последнюю кнопку
+            markup.add(buttons[i]) 
 
-    # Кнопки пагинации
     pagination_buttons = []
     if page > 0:
         pagination_buttons.append(InlineKeyboardButton("◀ Назад", callback_data=f"page_{category_id}_{page-1}"))
@@ -411,19 +376,16 @@ def show_items(chat_id, category_id, page=0):
         pagination_buttons.append(InlineKeyboardButton("Вперед ▶", callback_data=f"page_{category_id}_{page+1}"))
 
     if pagination_buttons:
-        markup.row(*pagination_buttons)  # Размещаем кнопки пагинации в одной строке
+        markup.row(*pagination_buttons) 
 
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
 
 
 
-#OK
 def handle_pagination(call):
     _, category_id, page = call.data.split("_")
     category_id = int(category_id)
     page = int(page)
-
-    # Удаляем старое сообщение и отправляем обновленное
     bot.delete_message(call.message.chat.id, call.message.message_id)
     show_items(call.message.chat.id, category_id, page)
 
@@ -431,13 +393,9 @@ def handle_pagination(call):
 
 
 
-
-
-# Словарь для хранения `message_id` медиа-сообщений
 media_messages = {}
 
 
-#OK
 def handle_item_selection(call):
     item_id = int(call.data.split("_")[1])
     conn = get_db_connection()
@@ -468,15 +426,12 @@ def handle_item_selection(call):
                 photo_data = photo_file.read()
                 media.append(InputMediaPhoto(photo_data))
 
-            # Удаляем все предыдущие сообщения медиа-группы
             if call.message.chat.id in media_messages:
                 for msg_id in media_messages[call.message.chat.id]:
                     bot.delete_message(call.message.chat.id, msg_id)
 
-            # Отправляем новую медиа-группу
             sent_messages = bot.send_media_group(call.message.chat.id, media)
 
-            # Запоминаем `message_id` всех отправленных сообщений
             media_messages[call.message.chat.id] = [msg.message_id for msg in sent_messages]
 
         except FileNotFoundError:
@@ -490,14 +445,11 @@ def handle_item_selection(call):
 
 
 
-
-
-# Создать Категории #OK
 def create_category(chat_id):
     msg = bot.send_message(chat_id, "Введите название новой категории:")
     bot.register_next_step_handler(msg, process_category_name)
 
-#OK
+
 def process_category_name(message):
     name = message.text.strip()
     conn = get_db_connection()
@@ -514,29 +466,26 @@ def process_category_name(message):
 
 
 
-#Создать Подкатегории #OK
+
 def create_subcategory(chat_id):
     user_states[chat_id] = {"action": "create_subcat", "path": []}
     show_category_selector(chat_id, parent_id=None)
 
-#OK
+
 def add_item(chat_id):
     user_states[chat_id] = {"action": "add_item", "path": []}
     show_category_selector(chat_id, parent_id=None)
 
-#OK
+
 def show_category_selector(chat_id, parent_id, message_id=None):
-    # Инициализация user_states, если ещё нет
     if chat_id not in user_states:
         user_states[chat_id] = {
             "action": None,
             "path": []
         }
 
-    # Если parent_id задан, и его ещё нет в path — добавляем (при вложенном переходе)
     if parent_id is not None:
         if user_states[chat_id]["path"]:
-            # Обновляем, только если последний элемент не текущий
             if user_states[chat_id]["path"][-1] != parent_id:
                 user_states[chat_id]["path"].append(parent_id)
         else:
@@ -574,7 +523,6 @@ def show_category_selector(chat_id, parent_id, message_id=None):
 
 
 
-#OK
 def save_subcategory(message, parent_id, path):
     name = message.text.strip()
     conn = get_db_connection()
@@ -592,19 +540,18 @@ def save_subcategory(message, parent_id, path):
 
 
 
-# Добавление товара #OK
 def ask_for_item_description(message, path, category_id):
     title = message.text.strip()
     msg = bot.send_message(message.chat.id, "Введите описание товара:")
     bot.register_next_step_handler(msg, lambda m: ask_for_item_photo(m, path, category_id, title))
 
-#OK
+
 def ask_for_item_photo(message, path, category_id, title):
     description = message.text.strip()
     msg = bot.send_message(message.chat.id, "Отправьте фото товара или напишите 'пропустить':")
     bot.register_next_step_handler(msg, lambda m: ask_for_item_video(m, path, category_id, title, description))
 
-#OK
+
 def ask_for_item_video(message, path, category_id, title, description):
     photo_id = None
     if message.content_type == 'photo':
@@ -615,7 +562,7 @@ def ask_for_item_video(message, path, category_id, title, description):
     msg = bot.send_message(message.chat.id, "Отправьте видео товара или напишите 'пропустить':")
     bot.register_next_step_handler(msg, lambda m: save_item(m, path, category_id, title, description, photo_id))
 
-#OK
+
 def save_item(message, path, category_id, title, description, photo_id):
     video_id = None
     if message.content_type == 'video':
