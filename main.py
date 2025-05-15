@@ -104,7 +104,10 @@ def delete_menu(call):
 
 #OK
 def delback_(call):
+    user_id = call.from_user.id
     current_id = int(call.data.split("_")[1])
+
+    # Получаем parent_id из БД
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT parent_id FROM categories WHERE id = %s", (current_id,))
@@ -112,7 +115,17 @@ def delback_(call):
     parent_id = row[0] if row else None
     cursor.close()
     conn.close()
+
+    # Обновляем путь
+    action_state = user_states.get(user_id, {})
+    path = action_state.get("path", [])
+    if path and path[-1] == current_id:
+        path.pop()  # Удаляем текущую категорию
+    user_states[user_id] = {"path": path}
+
+    # Переход вверх
     navigate_delete_categories(call, parent_id=parent_id)
+
 
 
 #OK
@@ -190,12 +203,19 @@ def navigate_delete_categories(call, parent_id=None):
         cursor.execute("SELECT name FROM categories WHERE id = %s", (parent_id,))
         parent = cursor.fetchone()
         
-        # title = f"🗂 Подкатегории '{parent['name']}':"
 
         user_id = call.from_user.id
-        action_state = user_states.get(user_id)
+        action_state = user_states.get(user_id, {})
 
         path = action_state.get("path", [])
+        if parent_id:
+            if not path or path[-1] != parent_id:
+                path.append(parent_id)
+        else:
+            path = []
+        user_states[user_id] = {"path": path}
+
+
         path_str = get_path_string(path)
         title = f"🗂 Подкатегории '{path_str}':"
 
