@@ -165,12 +165,26 @@ def return_to_start(call):
 
 
 
+# def get_full_category_path(category_id):
+#     conn = get_db_connection()
+#     cursor = conn.cursor(dictionary=True)
 
-def get_full_category_path(cursor, parent_id):
-    cursor.execute("SELECT name, parent_id FROM categories WHERE id = %s", (parent_id,))
-    parent = cursor.fetchone()
-    return f"{get_full_category_path(cursor, parent['parent_id'])} -> {parent['name']}" if parent and parent['parent_id'] else parent['name']
+#     path = []
+#     current_id = category_id
+#     while current_id:
+#         cursor.execute("SELECT id, name, parent_id FROM categories WHERE id = %s", (current_id,))
+#         row = cursor.fetchone()
+#         if row:
+#             path.insert(0, row['name'])
+#             current_id = row['parent_id']
+#         else:
+#             break
 
+#     cursor.close()
+#     conn.close()
+#     print(path, 'get_full_category_path')
+#     print(type(path))
+#     return " / ".join(path)
 
 
 
@@ -192,6 +206,7 @@ def navigate_delete_categories(call, parent_id=None):
     cursor.close()
     conn.close()
 
+
 def update_user_path(user_id, parent_id):
     action_state = user_states.get(user_id, {})
     path = action_state.get("path", [])
@@ -206,6 +221,8 @@ def update_user_path(user_id, parent_id):
 
 def build_title(cursor, parent_id, path):
     if parent_id:
+        print(path, 'path in build_title')
+        print(type(path), 'path in build_title')
         path_str = get_path_string(path)
         return f"🗂 Подкатегории '{path_str}':"
     else:
@@ -281,51 +298,81 @@ def handle_category_selection(call):
         return
 
     action_state = user_states[user_id]
+    action = call.data
 
-    if call.data == "selectcat_back":
-        if action_state["path"]:
-            action_state["path"].pop()
-        parent_id = action_state["path"][-1] if action_state["path"] else None
-        show_category_selector(user_id, parent_id, message_id=call.message.message_id)
+    if action == "selectcat_back":
+        handle_back_action(user_id, action_state, call.message.message_id)
 
-    elif call.data == "selectcat_done":
-        path = action_state["path"]
-        if not path:
-            create_category(user_id)
-            return
-        category_id = path[-1]
-        if action_state["action"] == "create_subcat":
-            msg = bot.send_message(user_id, "Введите имя подкатегории:")
-            bot.register_next_step_handler(msg, lambda m: save_subcategory(m, category_id, get_path_string(path)))
-        elif action_state["action"] == "add_item":
-            msg = bot.send_message(user_id, "Введите название товара:")
-            bot.register_next_step_handler(msg, lambda m: ask_for_item_description(m, get_path_string(path), category_id))
-        del user_states[user_id]
+    elif action == "selectcat_done":
+        handle_done_action(user_id, action_state)
 
-    else:
-        cat_id = int(call.data.split("_")[1])
-        action_state["path"].append(cat_id)
+    elif action.startswith("selectcat_"):
+        cat_id = int(action.split("_")[1])
+        handle_category_click(user_id, action_state, cat_id, call.message.message_id)
 
-        if action_state["action"] == "view_catalog":
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (cat_id,))
-            subcategory_count = cursor.fetchone()[0]
-            cursor.close()
-            conn.close()
 
-            if subcategory_count > 0:
-                show_category_selector(user_id, cat_id, message_id=call.message.message_id)
-            else:
-                show_items(user_id, cat_id)
-                del user_states[user_id]
+def handle_back_action(user_id, action_state, message_id):
+    if action_state["path"]:
+        action_state["path"].pop()
+    parent_id = action_state["path"][-1] if action_state["path"] else None
+    show_category_selector(user_id, parent_id, message_id=message_id)
+
+
+
+def handle_done_action(user_id, action_state):
+    path = action_state["path"]
+    if not path:
+        create_category(user_id)
+        return
+
+    category_id = path[-1]
+    action = action_state["action"]
+    path_str = get_path_string(path)
+
+    if action == "create_subcat":
+        msg = bot.send_message(user_id, "Введите имя подкатегории:")
+        bot.register_next_step_handler(msg, lambda m: save_subcategory(m, category_id, path_str))
+
+    elif action == "add_item":
+        msg = bot.send_message(user_id, "Введите название товара:")
+        bot.register_next_step_handler(msg, lambda m: ask_for_item_description(m, path_str, category_id))
+
+    del user_states[user_id]
+
+
+
+def handle_category_click(user_id, action_state, cat_id, message_id):
+    action_state["path"].append(cat_id)
+    action = action_state["action"]
+
+    if action == "view_catalog":
+        if has_subcategories(cat_id):
+            show_category_selector(user_id, cat_id, message_id=message_id)
         else:
-            show_category_selector(user_id, cat_id, message_id=call.message.message_id)
+            show_items(user_id, cat_id)
+            del user_states[user_id]
+    else:
+        show_category_selector(user_id, cat_id, message_id=message_id)
+
+
+
+
+def has_subcategories(category_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM categories WHERE parent_id = %s", (category_id,))
+    count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    return count > 0
+
+
+
+
 
 
 
 def get_path_string(path_ids):
-    print("path_ids:", path_ids)
     conn = get_db_connection()
     cursor = conn.cursor()
     names = []
@@ -341,44 +388,50 @@ def get_path_string(path_ids):
 
 
 def show_items(chat_id, category_id, page=0):
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    
-    cursor.execute("SELECT id, title FROM items WHERE category_id = %s", (category_id,))
-    items = cursor.fetchall()
-    cursor.close()
-    conn.close()
+    items = get_items_by_category(category_id)
+    if not items:
+        bot.send_message(chat_id, "❌ В этой категории нет товаров.")
+        return
+    markup, page_items, total_pages = build_items_markup(items, category_id, page)
+    text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
+    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
 
-    items_per_page = 8
+
+
+def build_items_markup(items, category_id, page, items_per_page=8):
     total_pages = (len(items) - 1) // items_per_page + 1
-    
     start = page * items_per_page
     end = start + items_per_page
     page_items = items[start:end]
 
-    text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
     markup = InlineKeyboardMarkup(row_width=2)
-
-    buttons = []
-    for item in page_items:
-        buttons.append(InlineKeyboardButton(item['title'], callback_data=f"item_{item['id']}"))
-
+    buttons = [InlineKeyboardButton(item['title'], callback_data=f"item_{item['id']}") for item in page_items]
+    
     for i in range(0, len(buttons), 2):
-        if i+1 < len(buttons):
-            markup.row(buttons[i], buttons[i+1]) 
-        else:
-            markup.add(buttons[i]) 
+        markup.row(*buttons[i:i+2])
 
-    pagination_buttons = []
+    pagination = []
     if page > 0:
-        pagination_buttons.append(InlineKeyboardButton("◀ Назад", callback_data=f"page_{category_id}_{page-1}"))
+        pagination.append(InlineKeyboardButton("◀ Назад", callback_data=f"page_{category_id}_{page-1}"))
     if page < total_pages - 1:
-        pagination_buttons.append(InlineKeyboardButton("Вперед ▶", callback_data=f"page_{category_id}_{page+1}"))
+        pagination.append(InlineKeyboardButton("Вперед ▶", callback_data=f"page_{category_id}_{page+1}"))
 
-    if pagination_buttons:
-        markup.row(*pagination_buttons) 
+    if pagination:
+        markup.row(*pagination)
 
-    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+    return markup, page_items, total_pages
+
+
+
+
+def get_items_by_category(category_id):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT id, title FROM items WHERE category_id = %s", (category_id,))
+    items = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    return items
 
 
 
@@ -476,7 +529,7 @@ def add_item(chat_id):
     user_states[chat_id] = {"action": "add_item", "path": []}
     show_category_selector(chat_id, parent_id=None)
 
-
+# раскидать по функциям
 def show_category_selector(chat_id, parent_id, message_id=None):
     if chat_id not in user_states:
         user_states[chat_id] = {
@@ -514,12 +567,25 @@ def show_category_selector(chat_id, parent_id, message_id=None):
     markup.add(InlineKeyboardButton("🔙 Назад", callback_data="start"))
 
     if message_id:
-        bot.edit_message_text("Выберите категорию:", chat_id=chat_id, message_id=message_id, reply_markup=markup)
+        path_str = path_show_category_selector(chat_id, parent_id)
+        bot.edit_message_text(f"Выберите категорию: {path_str}", chat_id=chat_id, message_id=message_id, reply_markup=markup)
     else:
         bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
 
     cursor.close()
     conn.close()
+
+
+# фиксить не полный путь 
+def path_show_category_selector(chat_id, parent_id):
+        user_id = chat_id 
+        path = user_states.get(user_id, {}).get("path", [])
+        if parent_id not in path:
+            path.append(parent_id)
+        user_states[user_id]["path"] = path
+        print(path, 'Полный path в show_category_selector') 
+        path_str = get_path_string(path)
+        return path_str
 
 
 
