@@ -330,14 +330,17 @@ def handle_category_click(user_id, action_state, cat_id, message_id):
 
     if action == "view_catalog":
         if has_subcategories(cat_id):
+            print("Вызов show_category_selector")
             show_category_selector(user_id, cat_id, message_id=message_id)
         else:
+            print("Вызов show_category_selector")
             show_items(user_id, cat_id)
             if user_states[user_id]["path"]:
                 user_states[user_id]["path"].pop()
 
             show_category_selector(user_id, cat_id, message_id=message_id)
     else:   
+        print("Вызов show_category_selector")
         show_category_selector(user_id, cat_id, message_id=message_id)
 
 
@@ -353,8 +356,9 @@ def show_category_selector(chat_id, parent_id, message_id=None):
     update_user_path(chat_id, parent_id)
     categories = fetch_categories(parent_id)
     markup = build_category_markup(chat_id, categories, parent_id)
+    
+    print(f"Вызов send_or_edit_category_message с message_id={message_id}")
     send_or_edit_category_message(chat_id, message_id, markup, parent_id)
-
 
 
 def ensure_user_state(chat_id):
@@ -402,9 +406,11 @@ def build_category_markup(chat_id, categories, parent_id):
 
 
 def send_or_edit_category_message(chat_id, message_id, markup, parent_id):
+    
     path_str = path_show_category_selector(chat_id, parent_id)
     text = f"Выберите категорию: {path_str}" if message_id else "Выберите категорию:"
-
+    print(text, 'text in send_or_edit_category_message')
+    
     if message_id:
         bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
     else:
@@ -463,8 +469,9 @@ def show_items(chat_id, category_id, page=0):
     markup, page_items, total_pages = build_items_markup(items, category_id, page)
     text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-
-    show_category_selector(chat_id, parent_id=category_id)
+    
+    print('show_items')
+    # show_category_selector(chat_id, parent_id=category_id)
 
 
 def build_items_markup(items, category_id, page, items_per_page=8):
