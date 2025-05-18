@@ -49,6 +49,7 @@ def callback_query(call):
         browse_catalog(call.message.chat.id)
 
     elif call.data.startswith("selectcat_"):
+        print(user_states, '========================')
         handle_category_selection(call)
     
     elif call.data.startswith("item_"):
@@ -170,6 +171,7 @@ def return_to_start(call):
 
 def navigate_delete_categories(call, parent_id=None):
     user_id = call.from_user.id
+    print(user_id)
     update_user_path(user_id, parent_id)
 
     conn = get_db_connection()
@@ -274,13 +276,14 @@ def handle_category_selection(call):
     
     
     user_id = call.message.chat.id
+    print(user_id, user_states)
     if user_id not in user_states:
         user_states[user_id] = {"action": "view_catalog", "path": []}
 
 
     action_state = user_states[user_id]
     action = call.data
-    
+
     if action == "selectcat_back":
         handle_back_action(user_id, action_state, call.message.message_id)
 
@@ -288,6 +291,7 @@ def handle_category_selection(call):
         handle_done_action(user_id, action_state)
 
     elif action.startswith("selectcat_"):
+        print(user_states, 'in selectcat_ in handle_category_selection')
         cat_id = int(action.split("_")[1])
         handle_category_click(user_id, action_state, cat_id, call.message.message_id)
 
@@ -319,13 +323,12 @@ def handle_done_action(user_id, action_state):
         msg = bot.send_message(user_id, "Введите название товара:")
         bot.register_next_step_handler(msg, lambda m: ask_for_item_description(m, path_str, category_id))
     
-    if user_states[user_id]["path"]:
-        user_states[user_id]["path"].pop() 
-
+    del user_states[user_id]
 
 
 def handle_category_click(user_id, action_state, cat_id, message_id):
     action_state["path"].append(cat_id)
+    print(action_state)
     action = action_state["action"]
 
     if action == "view_catalog":
@@ -333,11 +336,8 @@ def handle_category_click(user_id, action_state, cat_id, message_id):
             show_category_selector(user_id, cat_id, message_id=message_id)
         else:
             show_items(user_id, cat_id)
-            if user_states[user_id]["path"]:
-                user_states[user_id]["path"].pop()
-
-            show_category_selector(user_id, cat_id, message_id=message_id)
-    else:   
+            del user_states[user_id]
+    else:
         show_category_selector(user_id, cat_id, message_id=message_id)
 
 
@@ -346,75 +346,68 @@ def handle_category_click(user_id, action_state, cat_id, message_id):
 
 
 
-# show_category -----------------------------------------------------------------------------------------------------------------------------
 
+
+
+
+# раскидать по функциям
 def show_category_selector(chat_id, parent_id, message_id=None):
-    ensure_user_state(chat_id)
-    update_user_path(chat_id, parent_id)
-    categories = fetch_categories(parent_id)
-    markup = build_category_markup(chat_id, categories, parent_id)
-    send_or_edit_category_message(chat_id, message_id, markup, parent_id)
-
-
-
-def ensure_user_state(chat_id):
     if chat_id not in user_states:
-        user_states[chat_id] = {"action": None, "path": []}
+        user_states[chat_id] = {
+            "action": None,
+            "path": []
+        }
 
+    update_user_path(chat_id, parent_id)
 
-def update_user_path(chat_id, parent_id):
-    if parent_id is not None:
-        path = user_states[chat_id]["path"]
-        if not path or path[-1] != parent_id:
-            path.append(parent_id)
-
-
-def fetch_categories(parent_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-
-    if parent_id is None:
-        cursor.execute("SELECT id, name FROM categories WHERE parent_id IS NULL")
-    else:
-        cursor.execute("SELECT id, name FROM categories WHERE parent_id = %s", (parent_id,))
     
-    categories = cursor.fetchall()
+    path = user_states[chat_id].get("path", [])
+    title = build_title(cursor, parent_id, path)
+    categories = get_categories(cursor, parent_id)
+
+    markup = show_category_selector_markup(categories, chat_id, parent_id)
+
+    if message_id:
+        bot.edit_message_text(title, chat_id=chat_id,
+                                message_id=message_id, reply_markup=markup)
+    else:
+        bot.send_message(chat_id, "Выберите категорию:", reply_markup=markup)
+
     cursor.close()
     conn.close()
-    return categories
 
 
-def build_category_markup(chat_id, categories, parent_id):
-    markup = InlineKeyboardMarkup()
+
+
+
+def show_category_selector_markup(categories, chat_id, parent_id):
+    markup = InlineKeyboardMarkup()    
     
     for cat in categories:
-        markup.add(InlineKeyboardButton(cat['name'], callback_data=f"selectcat_{cat['id']}"))
+        print(user_states, 'show_category_selector_markup')
+        markup.add(InlineKeyboardButton(f"📁 {cat['name']}", callback_data=f"selectcat_{cat['id']}"))
 
     if parent_id is not None:
-        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
+        markup.add(InlineKeyboardButton("⬅️ СОСАЛ?", callback_data="selectcat_back"))
 
-    if user_states.get(chat_id, {}).get("action") != "view_catalog":
-        markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
+    # if user_states.get(chat_id, {}).get("action") != "view_catalog":
+    #     markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
 
     markup.add(InlineKeyboardButton("🔙 Назад", callback_data="start"))
-    
     return markup
 
 
-def send_or_edit_category_message(chat_id, message_id, markup, parent_id):
-    path_str = path_show_category_selector(chat_id, parent_id)
-    text = f"Выберите категорию: {path_str}" if message_id else "Выберите категорию:"
-
-    if message_id:
-        bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
-    else:
-        bot.send_message(chat_id, text, reply_markup=markup)
 
 
 
+# фиксить не полный путь 
 def path_show_category_selector(chat_id, parent_id):
         user_id = chat_id 
-        path = user_states.setdefault(user_id, {"action": "view_catalog", "path": []})["path"]
+        path = user_states.get(user_id, {}).get("path", [])
+        if parent_id not in path:
+            path.append(parent_id)
         user_states[user_id]["path"] = path
         path_str = get_path_string(path)
         return path_str
@@ -422,22 +415,7 @@ def path_show_category_selector(chat_id, parent_id):
 
 
 
-def get_path_string(path_ids):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    names = []
-    for cat_id in path_ids:
-        cursor.execute("SELECT name FROM categories WHERE id = %s", (cat_id,))
-        row = cursor.fetchone()
-        if row:
-            names.append(row[0])
-    cursor.close()
-    conn.close()
-    return " > ".join(names)
 
-
-
-# -----------------------------------------------------------------------------------------------------------------------------
 
 
 
@@ -452,6 +430,23 @@ def has_subcategories(category_id):
 
 
 
+
+
+
+
+def get_path_string(path_ids):
+    print(path_ids, 'vzevzevze')
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    names = []
+    for cat_id in path_ids:
+        cursor.execute("SELECT name FROM categories WHERE id = %s", (cat_id,))
+        row = cursor.fetchone()
+        if row:
+            names.append(row[0])
+    cursor.close()
+    conn.close()
+    return " > ".join(names)
 
 
 
@@ -613,7 +608,7 @@ def save_subcategory(message, parent_id, path):
     else:
         cursor.execute("INSERT INTO categories (name, parent_id) VALUES (%s, %s)", (name, parent_id))
         conn.commit()
-        bot.send_message(message.chat.id, f"Подкатегория '{name}' добавлена в '{path}' > {name}.")
+        bot.send_message(message.chat.id, f"Подкатегория '{name}' добавлена в '{path}'.")
     cursor.close()
     conn.close()
 
