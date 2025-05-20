@@ -462,13 +462,13 @@ def has_subcategories(category_id):
 
 def show_items(chat_id, category_id, page=0):
     items = get_items_by_category(category_id)
+    total_items = len(items) 
     if not items:
         bot.send_message(chat_id, "❌ В этой категории нет товаров.")
         return
     markup, page_items, total_pages = build_items_markup(items, category_id, page)
-    text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
+    text = f"Страница {page+1}/{total_pages} \nВсего товаров: {total_items}"
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-    # show_category_selector(chat_id, parent_id=category_id)
 
 
 def build_items_markup(items, category_id, page, items_per_page=8):
