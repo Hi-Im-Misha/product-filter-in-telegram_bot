@@ -5,7 +5,7 @@ from telebot.types import InputMediaPhoto, InputMediaVideo
 
 from MySQL_settings import get_db_connection
 
-TOKEN = '8052515987:AAHFVvb0KacBfsxnSW20T3AnENQYMUwN-bU'
+TOKEN = '7724774409:AAF09GhDB7tHZlpnB3NSqraDBZjl4J7SV44'
 ADMIN_ID = 5257065430
 
 bot = telebot.TeleBot(TOKEN)
@@ -89,9 +89,10 @@ def callback_query(call):
 
 
 def delete_menu(call):
+    print('delete_menu')
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🗑 Удалить категорию", callback_data="delete_categories"))
-    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="start"))
+    markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
     bot.edit_message_text("Выберите, что хотите удалить:", chat_id=call.message.chat.id,
                           message_id=call.message.message_id, reply_markup=markup)
 
@@ -121,6 +122,7 @@ def delback_(call):
 
 
 def delete_items(call, parent_id):
+    print('delete_items')
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT id, title FROM items WHERE category_id = %s ORDER BY id DESC LIMIT 20", (int(parent_id),))
@@ -132,8 +134,10 @@ def delete_items(call, parent_id):
     markup = InlineKeyboardMarkup()
     for item in items:
         markup.add(InlineKeyboardButton(f"🗑 {item['title']}", callback_data=f"confirm_deleteitem_{item['id']}"))
-    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="delete_menu"))
-
+    
+    back_callback = f"delback_{parent_id}" if parent_id else "delete_menu"
+    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data=back_callback))
+    markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
     bot.edit_message_text("Выберите товар для удаления:", chat_id=call.message.chat.id,
                           message_id=call.message.message_id, reply_markup=markup)
 
@@ -178,7 +182,7 @@ def navigate_delete_categories(call, parent_id=None):
     path = user_states[user_id].get("path", [])
     title = build_title(cursor, parent_id, path)
     categories = get_categories(cursor, parent_id)
-    markup = build_category_markup(cursor, categories, parent_id)
+    markup = del_build_category_markup(cursor, categories, parent_id)
 
     bot.edit_message_text(title, chat_id=call.message.chat.id,
                           message_id=call.message.message_id, reply_markup=markup)
@@ -216,7 +220,8 @@ def get_categories(cursor, parent_id):
     return cursor.fetchall()
 
 
-def build_category_markup(cursor, categories, parent_id):
+def del_build_category_markup(cursor, categories, parent_id):
+    print('del_build_category_markup')
     markup = InlineKeyboardMarkup()
 
     for cat in categories:
@@ -234,8 +239,8 @@ def build_category_markup(cursor, categories, parent_id):
             markup.add(InlineKeyboardButton("🗑 Удалить товар", callback_data=f"delete_items_{parent_id}"))
 
     back_callback = f"delback_{parent_id}" if parent_id else "delete_menu"
-    markup.add(InlineKeyboardButton("🔙 Назад", callback_data=back_callback))
-
+    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data=back_callback))
+    markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
     return markup
 
 
@@ -330,17 +335,14 @@ def handle_category_click(user_id, action_state, cat_id, message_id):
 
     if action == "view_catalog":
         if has_subcategories(cat_id):
-            print("Вызов show_category_selector")
             show_category_selector(user_id, cat_id, message_id=message_id)
         else:
-            print("Вызов show_category_selector")
             show_items(user_id, cat_id)
             if user_states[user_id]["path"]:
                 user_states[user_id]["path"].pop()
 
             show_category_selector(user_id, cat_id, message_id=message_id)
     else:   
-        print("Вызов show_category_selector")
         show_category_selector(user_id, cat_id, message_id=message_id)
 
 
@@ -353,11 +355,9 @@ def handle_category_click(user_id, action_state, cat_id, message_id):
 
 def show_category_selector(chat_id, parent_id, message_id=None):
     ensure_user_state(chat_id)
-    update_user_path(chat_id, parent_id)
+    show_update_user_path(chat_id, parent_id)
     categories = fetch_categories(parent_id)
     markup = build_category_markup(chat_id, categories, parent_id)
-    
-    print(f"Вызов send_or_edit_category_message с message_id={message_id}")
     send_or_edit_category_message(chat_id, message_id, markup, parent_id)
 
 
@@ -366,7 +366,7 @@ def ensure_user_state(chat_id):
         user_states[chat_id] = {"action": None, "path": []}
 
 
-def update_user_path(chat_id, parent_id):
+def show_update_user_path(chat_id, parent_id):
     if parent_id is not None:
         path = user_states[chat_id]["path"]
         if not path or path[-1] != parent_id:
@@ -400,7 +400,7 @@ def build_category_markup(chat_id, categories, parent_id):
     if user_states.get(chat_id, {}).get("action") != "view_catalog":
         markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
 
-    markup.add(InlineKeyboardButton("🔙 Назад", callback_data="start"))
+    markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
     
     return markup
 
@@ -409,7 +409,6 @@ def send_or_edit_category_message(chat_id, message_id, markup, parent_id):
     
     path_str = path_show_category_selector(chat_id, parent_id)
     text = f"Выберите категорию: {path_str}" if message_id else "Выберите категорию:"
-    print(text, 'text in send_or_edit_category_message')
     
     if message_id:
         bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
@@ -469,8 +468,6 @@ def show_items(chat_id, category_id, page=0):
     markup, page_items, total_pages = build_items_markup(items, category_id, page)
     text = f"<b>Товары в категории:</b> (Страница {page+1}/{total_pages})\n\n"
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-    
-    print('show_items')
     # show_category_selector(chat_id, parent_id=category_id)
 
 
