@@ -1,7 +1,7 @@
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.types import InputMediaPhoto, InputMediaVideo
-
+from load_products import safe_from_xlsx
 
 from MySQL_settings import get_db_connection
 
@@ -43,7 +43,7 @@ def callback_query(call):
         create_subcategory(call.message.chat.id)
     
     elif call.data == "add_item":
-        add_item(call.message.chat.id)
+        add_item_func(call.message.chat.id)
     
     elif call.data == "catalog":
         browse_catalog(call.message.chat.id)
@@ -87,9 +87,12 @@ def callback_query(call):
         deleteitem_confirm(call)
 
 
+    elif call.data.startswith("load_xlsx_"):
+        parent_id = call.data.split("_")[2]
+        print(parent_id)
+        management_load_xlsx(parent_id)
 
 def delete_menu(call):
-    print('delete_menu')
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("🗑 Удалить категорию", callback_data="delete_categories"))
     markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
@@ -122,7 +125,6 @@ def delback_(call):
 
 
 def delete_items(call, parent_id):
-    print('delete_items')
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT id, title FROM items WHERE category_id = %s ORDER BY id DESC LIMIT 20", (int(parent_id),))
@@ -221,7 +223,6 @@ def get_categories(cursor, parent_id):
 
 
 def del_build_category_markup(cursor, categories, parent_id):
-    print('del_build_category_markup')
     markup = InlineKeyboardMarkup()
 
     for cat in categories:
@@ -398,15 +399,15 @@ def build_category_markup(chat_id, categories, parent_id):
     user_action = user_states.get(chat_id, {}).get("action")
 
     if user_action == "add_item":
-        print('user_action == "add_item"')
         if parent_id is not None:
             if not has_subcategories(parent_id):
+                print(categories, 'categories', parent_id, 'parent_id', chat_id, 'chat_id')
                 markup.add(InlineKeyboardButton("✅ Добавить товар в эту категорию", callback_data="selectcat_done"))
+                markup.add(InlineKeyboardButton("✅ Добавить масив в эту категорию", callback_data=f"load_xlsx_{parent_id}"))
             else:
                 markup.add(InlineKeyboardButton("❌ Нельзя добавить: есть подкатегории", callback_data="selectcat_blocked"))
 
     elif user_action != "view_catalog":
-        print('user_action != "view_catalog"')
         if parent_id is not None:
             if not has_items(parent_id):
                 markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
@@ -421,6 +422,17 @@ def build_category_markup(chat_id, categories, parent_id):
     markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
 
     return markup
+
+
+
+
+
+
+def management_load_xlsx(parent_id):
+    print(parent_id)
+    safe_from_xlsx(parent_id)
+
+
 
 
 
@@ -634,7 +646,7 @@ def create_subcategory(chat_id):
     show_category_selector(chat_id, parent_id=None)
 
 
-def add_item(chat_id):
+def add_item_func(chat_id):
     user_states[chat_id] = {"action": "add_item", "path": []}
     show_category_selector(chat_id, parent_id=None)
 
@@ -644,6 +656,7 @@ def add_item(chat_id):
 
 
 def save_subcategory(message, parent_id, path):
+    print(message,parent_id, path)
     name = message.text.strip()
     conn = get_db_connection()
     cursor = conn.cursor()
