@@ -89,7 +89,6 @@ def callback_query(call):
 
     elif call.data.startswith("load_xlsx_"):
         parent_id = call.data.split("_")[2]
-        print(parent_id)
         management_load_xlsx(parent_id)
 
 def delete_menu(call):
@@ -294,6 +293,7 @@ def handle_category_selection(call):
         handle_done_action(user_id, action_state)
 
     elif action.startswith("selectcat_"):
+        print(action)
         cat_id = int(action.split("_")[1])
         handle_category_click(user_id, action_state, cat_id, call.message.message_id)
 
@@ -393,26 +393,24 @@ def build_category_markup(chat_id, categories, parent_id):
     markup = InlineKeyboardMarkup()
 
     for cat in categories:
-        markup.add(InlineKeyboardButton(cat['name'], callback_data=f"selectcat_{cat['id']}"))
-
+        markup.add(InlineKeyboardButton(f"📁 {cat['name']}", callback_data=f"selectcat_{cat['id']}"))
 
     user_action = user_states.get(chat_id, {}).get("action")
 
     if user_action == "add_item":
         if parent_id is not None:
             if not has_subcategories(parent_id):
-                print(categories, 'categories', parent_id, 'parent_id', chat_id, 'chat_id')
-                markup.add(InlineKeyboardButton("✅ Добавить товар в эту категорию", callback_data="selectcat_done"))
-                markup.add(InlineKeyboardButton("✅ Добавить масив в эту категорию", callback_data=f"load_xlsx_{parent_id}"))
+                markup.add(InlineKeyboardButton("1️⃣✅ Добавить в ручную в эту категорию", callback_data="selectcat_done"))
+                markup.add(InlineKeyboardButton("📦✅ Добавить из файла в эту категорию", callback_data=f"load_xlsx_{parent_id}"))
             else:
-                markup.add(InlineKeyboardButton("❌ Нельзя добавить: есть подкатегории", callback_data="selectcat_blocked"))
+                markup.add(InlineKeyboardButton("❌ Нельзя добавить: есть подкатегории", callback_data="selectcat_back"))
 
     elif user_action != "view_catalog":
         if parent_id is not None:
             if not has_items(parent_id):
                 markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
             else:
-                markup.add(InlineKeyboardButton("❌ Нельзя выбрать: есть товары", callback_data="selectcat_blocked"))
+                markup.add(InlineKeyboardButton("❌ Нельзя выбрать: есть товары", callback_data="selectcat_back"))
         else:
             markup.add(InlineKeyboardButton("✅ Создать категорию", callback_data="selectcat_done"))
 
@@ -429,7 +427,6 @@ def build_category_markup(chat_id, categories, parent_id):
 
 
 def management_load_xlsx(parent_id):
-    print(parent_id)
     safe_from_xlsx(parent_id)
 
 
@@ -656,7 +653,6 @@ def add_item_func(chat_id):
 
 
 def save_subcategory(message, parent_id, path):
-    print(message,parent_id, path)
     name = message.text.strip()
     conn = get_db_connection()
     cursor = conn.cursor()
