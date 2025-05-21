@@ -84,7 +84,7 @@ def callback_query(call):
     elif call.data.startswith("start"):
         return_to_start(call)
     elif call.data.startswith("confirm_deleteitem_"):
-        confirm_deleteitem(call)
+        deleteitem_confirm(call)
 
 
 
@@ -143,7 +143,7 @@ def delete_items(call, parent_id):
 
 
 
-def confirm_deleteitem(call):
+def deleteitem_confirm(call):
     item_id = int(call.data.split("_")[-1])
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -390,19 +390,54 @@ def fetch_categories(parent_id):
 
 def build_category_markup(chat_id, categories, parent_id):
     markup = InlineKeyboardMarkup()
-    
+
     for cat in categories:
         markup.add(InlineKeyboardButton(cat['name'], callback_data=f"selectcat_{cat['id']}"))
+
+
+    user_action = user_states.get(chat_id, {}).get("action")
+
+    if user_action == "add_item":
+        print('user_action == "add_item"')
+        if parent_id is not None:
+            if not has_subcategories(parent_id):
+                markup.add(InlineKeyboardButton("✅ Добавить товар в эту категорию", callback_data="selectcat_done"))
+            else:
+                markup.add(InlineKeyboardButton("❌ Нельзя добавить: есть подкатегории", callback_data="selectcat_blocked"))
+
+    elif user_action != "view_catalog":
+        print('user_action != "view_catalog"')
+        if parent_id is not None:
+            if not has_items(parent_id):
+                markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
+            else:
+                markup.add(InlineKeyboardButton("❌ Нельзя выбрать: есть товары", callback_data="selectcat_blocked"))
+        else:
+            markup.add(InlineKeyboardButton("✅ Создать категорию", callback_data="selectcat_done"))
 
     if parent_id is not None:
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="selectcat_back"))
 
-    if user_states.get(chat_id, {}).get("action") != "view_catalog":
-        markup.add(InlineKeyboardButton("✅ Выбрать эту категорию", callback_data="selectcat_done"))
-
     markup.add(InlineKeyboardButton("🔙 На главную", callback_data="start"))
-    
+
     return markup
+
+
+
+
+
+
+# проверка на наличие товара
+def has_items(category_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM items WHERE category_id = %s", (category_id,))
+    count = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+    return count > 0
+
+
 
 
 def send_or_edit_category_message(chat_id, message_id, markup, parent_id):
@@ -454,6 +489,7 @@ def has_subcategories(category_id):
     cursor.close()
     conn.close()
     return count > 0
+
 
 
 
