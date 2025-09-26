@@ -17,8 +17,7 @@
 
 1. Клонируй репозиторий:
    ```bash
-   git clone https://github.com/username/telegram-mysql-bot.git
-   cd telegram-mysql-bot
+   git clone https://github.com/Hi-Im-Misha/product-filter-in-telegram_bot.git
 2. Установи зависимости:
     ```bash
     pip install -r requirements.txt
